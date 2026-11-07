@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10">
+<title>عداد السرعة</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#14181d; --line:#232a32; --text:#e8edf2; --muted:#8a96a3;
+    --accent:#e4002b; --ok:#2ecc71;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:-apple-system,"SF Pro Text","Segoe UI",Tahoma,sans-serif;
+    display:flex;flex-direction:column;align-items:center;
+    padding:calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px);
+    gap:16px;user-select:none
+  }
+  .seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px;width:100%;max-width:420px}
+  .seg button{flex:1;border:0;background:transparent;color:var(--muted);font:inherit;font-size:15px;padding:10px 0;border-radius:9px;cursor:pointer}
+  .seg button.on{background:var(--line);color:var(--text);font-weight:600}
+  .stage{width:100%;max-width:420px;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;position:relative}
+  svg{width:100%;height:100%;overflow:visible}
+  .needle{transform-origin:200px 200px;will-change:transform}
+  .digital{display:none;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;
+    border:1px solid var(--line);border-radius:28px;background:var(--panel)}
+  .digital .num{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:clamp(96px,34vw,160px);
+    font-weight:700;line-height:1;font-variant-numeric:tabular-nums;direction:ltr}
+  .digital .unit{color:var(--muted);font-size:20px;margin-top:8px;direction:ltr}
+  .digital .bar{width:80%;height:8px;background:var(--line);border-radius:4px;margin-top:28px;overflow:hidden;direction:ltr}
+  .digital .bar i{display:block;height:100%;width:0;background:var(--accent)}
+  .mode-digital .analog{display:none}
+  .mode-digital .digital{display:flex}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;max-width:420px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center}
+  .stat b{display:block;font-size:20px;font-variant-numeric:tabular-nums;direction:ltr}
+  .stat span{color:var(--muted);font-size:12px}
+  .status{color:var(--muted);font-size:13px;text-align:center;min-height:18px}
+  .status .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted);margin-left:6px;vertical-align:middle}
+  .status.live .dot{background:var(--ok)}
+  .actions{display:flex;gap:8px;width:100%;max-width:420px}
+  .actions button{flex:1;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit;font-size:15px;
+    padding:12px;border-radius:12px;cursor:pointer}
+  .actions button.primary{background:var(--accent);border-color:var(--accent);font-weight:600}
+</style>
+</head>
+<body>
+
+<div class="seg" id="unitSeg">
+  <button data-v="kmh">كيلومتر/س</button>
+  <button data-v="mph">ميل/س</button>
+</div>
+<div class="seg" id="modeSeg">
+  <button data-v="analog">عداد إبرة</button>
+  <button data-v="digital">رقمي</button>
+</div>
+
+<div class="stage" id="stage">
+  <svg class="analog" viewBox="0 0 400 400" id="gauge">
+    <circle cx="200" cy="200" r="190" fill="#14181d" stroke="#232a32" stroke-width="2"/>
+    <path id="track" fill="none" stroke="#232a32" stroke-width="10" stroke-linecap="round"/>
+    <path id="redzone" fill="none" stroke="#e4002b" stroke-width="10" stroke-linecap="round" opacity=".85"/>
+    <g id="ticks"></g>
+    <text id="aNum" x="200" y="290" text-anchor="middle" fill="#e8edf2" font-size="54" font-weight="700"
+      font-family="ui-monospace,Menlo,monospace">0</text>
+    <text id="aUnit" x="200" y="318" text-anchor="middle" fill="#8a96a3" font-size="16">km/h</text>
+    <g class="needle" id="needle">
+      <polygon points="196,200 204,200 201,48 199,48" fill="#e4002b"/>
+    </g>
+    <circle cx="200" cy="200" r="14" fill="#e8edf2"/>
+    <circle cx="200" cy="200" r="6" fill="#0b0d10"/>
+  </svg>
+  <div class="digital">
+    <div class="num" id="dNum">0</div>
+    <div class="unit" id="dUnit">km/h</div>
+    <div class="bar"><i id="dBar"></i></div>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="stat"><b id="sMax">0</b><span>أعلى سرعة</span></div>
+  <div class="stat"><b id="sAvg">0</b><span>المتوسط</span></div>
+  <div class="stat"><b id="sDist">0.00</b><span id="sDistLbl">المسافة (كم)</span></div>
+</div>
+
+<div class="status" id="status"><span class="dot"></span>اضغط "ابدأ" وفعّل صلاحية الموقع</div>
+
+<div class="actions">
+  <button class="primary" id="startBtn">ابدأ</button>
+  <button id="resetBtn">تصفير</button>
+</div>
+
+<script>
+(() => {
+  const UNITS = {
+    kmh: { f: 3.6,       max: 240, step: 20, label: "km/h", dist: 1/1000,    distLbl: "المسافة (كم)" },
+    mph: { f: 2.236936,  max: 160, step: 20, label: "mph",  dist: 1/1609.344, distLbl: "المسافة (ميل)" }
+  };
+  const A0 = -135, A1 = 135;            // زاوية بداية ونهاية العداد
+  const CX = 200, CY = 200;
+
+  const store = {
+    get(k, d){ try { return localStorage.getItem(k) || d; } catch(e){ return d; } },
+    set(k, v){ try { localStorage.setItem(k, v); } catch(e){} }
+  };
+
+  let unit = store.get("spd_unit", "kmh");
+  let mode = store.get("spd_mode", "analog");
+  let watchId = null, wakeLock = null;
+  let last = null;                       // آخر نقطة GPS
+  let speedMs = 0, maxMs = 0, distM = 0, movingSec = 0;
+
+  const $ = id => document.getElementById(id);
+
+  // ---------- رسم العداد ----------
+  const polar = (r, deg) => {
+    const a = (deg - 90) * Math.PI / 180;
+    return [CX + r * Math.cos(a), CY + r * Math.sin(a)];
+  };
+  const arc = (r, d0, d1) => {
+    const [x0,y0] = polar(r,d0), [x1,y1] = polar(r,d1);
+    return `M${x0} ${y0} A${r} ${r} 0 ${d1-d0>180?1:0} 1 ${x1} ${y1}`;
+  };
+  const valToDeg = v => A0 + (Math.min(v, UNITS[unit].max) / UNITS[unit].max) * (A1 - A0);
+
+  function drawGauge(){
+    const u = UNITS[unit];
+    $("track").setAttribute("d", arc(165, A0, A1));
+    $("redzone").setAttribute("d", arc(165, valToDeg(u.max * 0.8), A1));
+    let g = "";
+    for (let v = 0; v <= u.max; v += u.step / 2){
+      const major = v % u.step === 0;
+      const d = valToDeg(v);
+      const [x0,y0] = polar(major ? 150 : 156, d), [x1,y1] = polar(170, d);
+      g += `<line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}" stroke="${major?'#e8edf2':'#4a5560'}" stroke-width="${major?3:1.5}" stroke-linecap="round"/>`;
+      if (major){
+        const [tx,ty] = polar(126, d);
+        g += `<text x="${tx}" y="${ty+6}" text-anchor="middle" fill="#8a96a3" font-size="16" font-family="ui-monospace,Menlo,monospace">${v}</text>`;
+      }
+    }
+    $("ticks").innerHTML = g;
+    $("aUnit").textContent = $("dUnit").textContent = u.label;
+    $("sDistLbl").textContent = u.distLbl;
+  }
+
+  // ---------- عرض القيم ----------
+  // ---------- حركة سلسة بين قراءات GPS ----------
+  // GPS يعطي قراءة كل ~ثانية، فنحرّك العداد تدريجيًا من القيمة الحالية للجديدة خلال نفس المدة
+  let dispMs = 0, animFrom = 0, animTo = 0, animStart = 0, animDur = 1000, lastFixAt = 0;
+
+  function setTarget(ms){
+    const now = performance.now();
+    const gap = lastFixAt ? now - lastFixAt : 1000;
+    lastFixAt = now;
+    animFrom = dispMs;
+    animTo = ms;
+    animStart = now;
+    animDur = Math.min(1500, Math.max(400, gap));
+  }
+
+  function drawSpeed(){
+    const u = UNITS[unit];
+    const v = dispMs * u.f;
+    $("aNum").textContent = $("dNum").textContent = Math.round(v);
+    $("needle").style.transform = `rotate(${valToDeg(v)}deg)`;
+    $("dBar").style.width = Math.min(100, v / u.max * 100) + "%";
+  }
+
+  function tick(now){
+    const t = Math.min(1, (now - animStart) / animDur);
+    dispMs = animFrom + (animTo - animFrom) * t;
+    drawSpeed();
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  function render(){
+    const u = UNITS[unit];
+    drawSpeed();
+    $("sMax").textContent = Math.round(maxMs * u.f);
+    $("sAvg").textContent = movingSec > 0 ? Math.round(distM / movingSec * u.f) : 0;
+    $("sDist").textContent = (distM * u.dist).toFixed(2);
+  }
+
+  // ---------- أزرار الاختيار ----------
+  function bindSeg(id, get, set){
+    const seg = $(id);
+    const sync = () => seg.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === get()));
+    seg.addEventListener("click", e => { const b = e.target.closest("button"); if (b){ set(b.dataset.v); sync(); } });
+    sync();
+  }
+  bindSeg("unitSeg", () => unit, v => { unit = v; store.set("spd_unit", v); drawGauge(); render(); });
+  bindSeg("modeSeg", () => mode, v => { mode = v; store.set("spd_mode", v); applyMode(); });
+  function applyMode(){ $("stage").classList.toggle("mode-digital", mode === "digital"); }
+
+  // ---------- GPS ----------
+  const haversine = (a, b) => {
+    const R = 6371000, r = Math.PI/180;
+    const dLat = (b.lat-a.lat)*r, dLon = (b.lon-a.lon)*r;
+    const h = Math.sin(dLat/2)**2 + Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLon/2)**2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  };
+
+  function onPos(p){
+    const c = p.coords;
+    const pt = { lat: c.latitude, lon: c.longitude, t: p.timestamp, acc: c.accuracy };
+    let s = (c.speed != null && !isNaN(c.speed)) ? c.speed : null;
+
+    if (last){
+      const dt = (pt.t - last.t) / 1000;
+      const d = haversine(last, pt);
+      if (dt > 0){
+        if (s === null) s = d / dt;                     // بديل إذا الجهاز ما يعطي السرعة
+        if (s > 0.8 && d > Math.min(pt.acc, 25) * 0.3){ // تجاهل التذبذب وأنت واقف
+          distM += d; movingSec += dt;
+        }
+      }
+    }
+    if (s === null) s = 0;
+    if (s < 0.5) s = 0;                                 // أقل من ~2 كم/س = واقف
+    speedMs = s;
+    setTarget(s);
+    if (pt.acc <= 30) maxMs = Math.max(maxMs, s);       // أعلى سرعة فقط مع دقة جيدة
+    last = pt;
+
+    const st = $("status");
+    st.className = "status live";
+    st.innerHTML = `<span class="dot"></span>GPS شغال · الدقة ±${Math.round(pt.acc)} م`;
+    render();
+  }
+
+  function onErr(e){
+    const msg = { 1: "تم رفض صلاحية الموقع — فعّلها من إعدادات المتصفح", 2: "إشارة GPS غير متوفرة", 3: "انتهت مهلة GPS، جاري المحاولة" }[e.code] || "خطأ في GPS";
+    const st = $("status"); st.className = "status"; st.innerHTML = `<span class="dot"></span>${msg}`;
+  }
+
+  async function keepAwake(){
+    try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch(e){}
+  }
+  document.addEventListener("visibilitychange", () => { if (watchId !== null && document.visibilityState === "visible") keepAwake(); });
+
+  $("startBtn").addEventListener("click", () => {
+    if (watchId !== null){
+      navigator.geolocation.clearWatch(watchId); watchId = null; last = null; speedMs = 0; setTarget(0); lastFixAt = 0;
+      try { wakeLock && wakeLock.release(); } catch(e){}
+      $("startBtn").textContent = "ابدأ";
+      $("status").className = "status"; $("status").innerHTML = '<span class="dot"></span>متوقف';
+      render(); return;
+    }
+    if (!("geolocation" in navigator)){ onErr({code:0}); return; }
+    if (!window.isSecureContext){
+      $("status").innerHTML = '<span class="dot"></span>لازم تفتح الصفحة من رابط https عشان يشتغل GPS';
+    }
+    watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+    $("startBtn").textContent = "إيقاف";
+    $("status").innerHTML = '<span class="dot"></span>جاري البحث عن إشارة GPS…';
+    keepAwake();
+  });
+
+  $("resetBtn").addEventListener("click", () => { maxMs = 0; distM = 0; movingSec = 0; render(); });
+
+  drawGauge(); applyMode(); render();
+})();
+</script>
+</body>
+</html>
